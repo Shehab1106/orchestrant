@@ -30,6 +30,9 @@ export interface MockGatewayConfig {
 /** Card token that forces a terminal (hard) decline. */
 export const INVALID_CARD_TOKEN = "invalid_card"
 
+/** Card token that triggers a 3DS challenge on the first (unauthenticated) charge. */
+export const THREE_DS_CARD_TOKEN = "tok_3ds"
+
 export class MockGateway implements PSPAdapter {
   public readonly providerId: string
   public readonly supportsExternal3DS: boolean
@@ -61,6 +64,12 @@ export class MockGateway implements PSPAdapter {
     //    engine SKIPS a fallback's second challenge on a resume).
     if (this.cfg.requires3dsAlways) return this.challenge()
     if (this.cfg.requires3ds && input.threeDSProof == null) return this.challenge()
+
+    // Magic 3DS test card: any provider challenges it on the unauthenticated
+    // first attempt, then authorizes once a proof is present on the resume.
+    if (input.card.token === THREE_DS_CARD_TOKEN && input.threeDSProof == null) {
+      return this.challenge()
+    }
 
     // 3. Forced / threshold soft decline (drives the cascade).
     const floor = this.cfg.declineBelowMinor ?? 100
