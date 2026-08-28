@@ -1,0 +1,12 @@
+node_modules
+dist
+.next
+out
+coverage
+*.log
+.DS_Store
+
+# Never commit secrets. Only .env.example is tracked.
+.env
+.env.local
+.env.*.local
