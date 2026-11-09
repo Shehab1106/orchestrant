@@ -1,13 +1,33 @@
 # orchestrant
 
 A framework-agnostic **payment orchestration engine**, wrapped in a thin
-**Next.js** app (API + checkout) — frontend and backend in one repo. It routes a
+**Next.js** app (API + checkout), frontend and backend in one repo. It routes a
 card charge across multiple providers, cascades to a fallback when a provider
 soft-declines, handles 3-D Secure, and stops cleanly on a hard decline, so a
 single savable payment gets every reasonable chance to succeed.
 
+![orchestrant checkout: a charge cascading from a soft-declining provider to an approving one, and a 3-D Secure challenge resuming to success](docs/demo.gif)
+
 The core engine is **pure TypeScript** with no framework or database dependency.
 Next.js (delivery) and Postgres (storage) plug in behind interfaces.
+
+## The hard part
+
+Orchestration is easy to describe and hard to get right, because the interesting cases are all
+failure cases. A charge can soft-decline (retry elsewhere), hard-decline (stop, don't burn the
+card on more attempts), time out (the money may or may not have moved), or demand a 3-D Secure
+challenge mid-flight. The engine models each outcome as an explicit `status` and lets *only*
+`soft_fail`/`timeout` cascade, so a savable payment gets every reasonable chance while a dead one
+stops immediately.
+
+Two invariants hold it together:
+
+- **Idempotent replay.** Every attempt is keyed, so a retried or duplicated request never
+  double-charges. A network blip on the client is safe to repeat.
+- **3-D Secure without double challenges.** `requires_3ds` pauses the chain; on resume, the
+  already-cleared provider is suppressed so the shopper is never challenged twice for one payment.
+
+The project exists to get that failure model right.
 
 ## Concepts
 
@@ -18,7 +38,7 @@ Next.js (delivery) and Postgres (storage) plug in behind interfaces.
 | **Cascade** (`executeChargeChain`) | Walks an ordered chain: success wins and stops; `soft_fail`/`timeout` fall through; `hard_fail` stops; `requires_3ds` pauses (and is suppressed on a resume so the shopper is never challenged twice). |
 | **Routing** (`resolveRoute`) | Picks the ordered chain from rules matched on `country` / `currency` / `card network`, using per-provider weights + an explicit fallback order. |
 | **Service** (`orchestrateCharge`) | Ties the engine to persistence: idempotent replay, route resolution, cascade, attempt recording. Depends only on ports. |
-| **Ports** | `AttemptsRepository` / `RoutingRuleRepository` / `IdempotencyStore` — implemented in-memory (tests, zero-setup) and on Postgres (Drizzle). |
+| **Ports** | `AttemptsRepository` / `RoutingRuleRepository` / `IdempotencyStore`, implemented in-memory (tests, zero-setup) and on Postgres (Drizzle). |
 
 ## The retry model
 
@@ -61,7 +81,7 @@ Open the checkout and pay. Test cards:
 |---|---|
 | `tok_ok` | cascades `mock_a` (soft-declines) → `mock_b` (approves) → success |
 | `tok_3ds` | 3-D Secure challenge, then approves on resume |
-| `invalid_card` | hard decline — stops the chain |
+| `invalid_card` | hard decline, stops the chain |
 
 Or call the API directly:
 
@@ -88,7 +108,7 @@ pnpm dev
 | `POST /api/refund` | `providerId`, `pspReference`, `amount`, `idempotencyKey` | dispatches to the adapter |
 | `POST /api/void` | `providerId`, `pspReference` | dispatches to the adapter |
 | `POST /api/webhooks/:vendor` | vendor payload | ack stub (signature + dispatch TODO) |
-| `GET /api/health` | — | liveness |
+| `GET /api/health` | none | liveness |
 
 ## Develop
 
@@ -98,16 +118,26 @@ pnpm typecheck   # tsc --noEmit
 pnpm build       # next build
 ```
 
-## Status
+## Scope and roadmap
 
-- [x] Engine spine: adapter contract, cascade (+ 3DS / skip-on-resume), routing, mock gateway
-- [x] Persistence: ports + in-memory + Postgres/Drizzle, and the `orchestrateCharge` service
-- [x] Next.js API: `/charge`, `/refund`, `/void`, `/webhooks/:vendor`, `/health`
-- [x] Checkout FE: card + cascade trail + 3DS challenge/resume
-- [ ] Real demo adapter (e.g. Stripe test-mode)
-- [ ] Webhook signature verification + dispatch
-- [ ] Hardening: rate limits, structured logging, a real 3DS challenge iframe
+The goal is a complete, correct **engine**, not a production gateway. The line is drawn on
+purpose: the orchestration logic (routing, cascade, 3DS, idempotency, persistence) is fully built
+and tested against a mock provider, so the hard part is done and verifiable without a merchant
+account or secrets.
+
+Built:
+
+- Engine spine: adapter contract, cascade (+ 3DS / skip-on-resume), routing, mock gateway
+- Persistence: ports + in-memory + Postgres/Drizzle, and the `orchestrateCharge` service
+- Next.js API: `/charge`, `/refund`, `/void`, `/webhooks/:vendor`, `/health`
+- Checkout FE: card + cascade trail + 3DS challenge/resume
+
+Deliberately out of scope (they need real provider credentials, not more engine):
+
+- A real demo adapter (e.g. Stripe test-mode) behind the existing `PSPAdapter` contract
+- Webhook signature verification + dispatch
+- Production hardening: rate limits, structured logging, a real 3DS challenge iframe
 
 ## License
 
-Personal project. All rights reserved (for now).
+MIT. See [LICENSE](./LICENSE).
