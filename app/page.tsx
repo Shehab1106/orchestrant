@@ -21,22 +21,11 @@ const TEST_CARDS = [
   { token: "invalid_card", label: "Hard decline (stops the chain)" },
 ]
 
-const COLORS = {
-  bg: "#f4f5f7",
-  card: "#ffffff",
-  border: "#e4e6eb",
-  text: "#1c1e21",
-  muted: "#6b7280",
-  accent: "#4f46e5",
-  success: "#0f9d58",
-  fail: "#d93025",
-  pending: "#1a73e8",
-}
-
-function statusColor(status: string): string {
-  if (status === "success") return COLORS.success
-  if (status === "requires_3ds") return COLORS.pending
-  return COLORS.fail
+function statusKind(status: string): "success" | "soft" | "hard" | "info" {
+  if (status === "success") return "success"
+  if (status === "soft_fail" || status === "timeout") return "soft"
+  if (status === "requires_3ds") return "info"
+  return "hard"
 }
 
 export default function Checkout() {
@@ -95,74 +84,77 @@ export default function Checkout() {
   }
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: COLORS.bg,
-        color: COLORS.text,
-        fontFamily: "system-ui, -apple-system, sans-serif",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "flex-start",
-        padding: "3rem 1rem",
-      }}
-    >
-      <div style={{ width: "100%", maxWidth: 440 }}>
-        <h1 style={{ fontSize: 22, margin: "0 0 2px" }}>orchestrant</h1>
-        <p style={{ color: COLORS.muted, margin: "0 0 20px", fontSize: 14 }}>
-          Demo checkout &middot; routes and cascades through mock providers
-        </p>
+    <main className="wrap">
+      <div className="shell">
+        <div className="brand">
+          <h1>
+            <span className="glyph" aria-hidden />
+            orchestrant
+          </h1>
+          <span className="envtag">Test mode</span>
+        </div>
+        <p className="tagline">Routes and cascades a charge across mock providers.</p>
 
-        <div
-          style={{
-            background: COLORS.card,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: 12,
-            padding: 24,
-            boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-          }}
-        >
+        <div className="card">
           {phase === "form" && (
             <>
-              <Field label="Amount (USD)">
-                <div style={{ display: "flex", alignItems: "center" }}>
-                  <span style={{ color: COLORS.muted, marginRight: 6 }}>$</span>
+              <label className="field">
+                <span className="lbl">Amount (USD)</span>
+                <div className="control">
+                  <span className="prefix">$</span>
                   <input
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     inputMode="decimal"
-                    style={inputStyle}
+                    aria-label="Amount in US dollars"
                   />
                 </div>
-              </Field>
+              </label>
 
-              <Field label="Test card">
-                <select value={token} onChange={(e) => setToken(e.target.value)} style={inputStyle}>
-                  {TEST_CARDS.map((c) => (
-                    <option key={c.token} value={c.token}>
-                      {c.token} — {c.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              <label className="field">
+                <span className="lbl">Test card</span>
+                <div className="control select-control">
+                  <select value={token} onChange={(e) => setToken(e.target.value)}>
+                    {TEST_CARDS.map((c) => (
+                      <option key={c.token} value={c.token}>
+                        {c.token} · {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </label>
 
-              <button onClick={onPay} disabled={busy} style={primaryButton(busy)}>
-                {busy ? "Processing…" : "Pay"}
+              <button className="btn btn-primary" onClick={onPay} disabled={busy}>
+                {busy ? (
+                  <>
+                    <span className="spin" aria-hidden />
+                    Processing
+                  </>
+                ) : (
+                  "Pay"
+                )}
               </button>
             </>
           )}
 
           {phase === "threeds" && (
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 40, marginBottom: 8 }}>🔐</div>
-              <h2 style={{ fontSize: 17, margin: "0 0 4px" }}>3-D Secure</h2>
-              <p style={{ color: COLORS.muted, fontSize: 14, margin: "0 0 18px" }}>
-                Your bank is asking you to authenticate this payment (mock ACS).
-              </p>
-              <button onClick={onCompleteChallenge} disabled={busy} style={primaryButton(busy)}>
-                {busy ? "Authenticating…" : "Complete authentication"}
+            <div className="threeds">
+              <div className="lock" aria-hidden>
+                <LockIcon />
+              </div>
+              <h2>3-D Secure</h2>
+              <p>Your bank is asking you to authenticate this payment (mock ACS).</p>
+              <button className="btn btn-primary" onClick={onCompleteChallenge} disabled={busy}>
+                {busy ? (
+                  <>
+                    <span className="spin" aria-hidden />
+                    Authenticating
+                  </>
+                ) : (
+                  "Complete authentication"
+                )}
               </button>
-              <button onClick={reset} disabled={busy} style={ghostButton}>
+              <button className="btn btn-ghost" onClick={reset} disabled={busy}>
                 Cancel
               </button>
             </div>
@@ -170,59 +162,63 @@ export default function Checkout() {
 
           {phase === "done" && result && (
             <>
-              <div
-                style={{
-                  display: "inline-block",
-                  padding: "3px 10px",
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "#fff",
-                  background: statusColor(result.status),
-                  marginBottom: 12,
-                }}
-              >
-                {result.status.toUpperCase()}
-                {result.replayed ? " · REPLAYED" : ""}
-              </div>
-
-              <p style={{ margin: "0 0 16px", fontSize: 15 }}>
+              <span className={`badge badge-${result.status === "requires_3ds" ? "3ds" : result.status}`}>
+                {result.status === "success" && <TickIcon />}
                 {result.status === "success"
-                  ? `Approved by ${result.providerId}.`
-                  : result.customerMessage}
+                  ? "Payment approved"
+                  : result.status === "failed"
+                    ? "Payment declined"
+                    : "Authentication required"}
+                {result.replayed ? " · replayed" : ""}
+              </span>
+
+              <p className="result-msg">
+                {result.status === "success" ? (
+                  <>
+                    Approved by <b className="mono">{result.providerId}</b>.
+                  </>
+                ) : (
+                  result.customerMessage
+                )}
               </p>
 
-              <div style={{ fontSize: 13, color: COLORS.muted, marginBottom: 6 }}>Attempt trail</div>
-              <div
-                style={{
-                  fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                  fontSize: 13,
-                  border: `1px solid ${COLORS.border}`,
-                  borderRadius: 8,
-                  overflow: "hidden",
-                }}
-              >
+              <div className="trail-head">Attempt trail</div>
+              <div className="trail">
                 {result.attempts.length === 0 && (
-                  <Row left="(no attempts)" right="" color={COLORS.muted} last />
+                  <div className="attempt">
+                    <span className="who" style={{ color: "var(--faint)" }}>
+                      no attempts
+                    </span>
+                  </div>
                 )}
-                {result.attempts.map((a, i) => (
-                  <Row
-                    key={`${a.providerId}-${i}`}
-                    left={a.providerId}
-                    right={a.status}
-                    color={statusColor(a.status)}
-                    last={i === result.attempts.length - 1}
-                  />
-                ))}
+                {result.attempts.map((a, i) => {
+                  const kind = statusKind(a.status)
+                  return (
+                    <div
+                      className="attempt"
+                      key={`${a.providerId}-${i}`}
+                      style={{ animationDelay: `${i * 110}ms` }}
+                    >
+                      <span className="node" aria-hidden>
+                        <span className={`dot dot-${kind}`} />
+                      </span>
+                      <span className="who-row">
+                        <span className="who">{a.providerId}</span>
+                        <span className={`pill pill-${kind}`}>{a.status}</span>
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
 
               {result.pspReference && (
-                <p style={{ color: COLORS.muted, fontSize: 12, marginTop: 12 }}>
-                  psp_reference: {result.pspReference}
+                <p className="pspref">
+                  <span>psp_reference</span>
+                  <span className="v">{result.pspReference}</span>
                 </p>
               )}
 
-              <button onClick={reset} style={{ ...primaryButton(false), marginTop: 18 }}>
+              <button className="btn btn-primary mt" onClick={reset}>
                 New payment
               </button>
             </>
@@ -233,77 +229,31 @@ export default function Checkout() {
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function TickIcon() {
   return (
-    <label style={{ display: "block", marginBottom: 16 }}>
-      <span style={{ display: "block", fontSize: 13, color: COLORS.muted, marginBottom: 6 }}>
-        {label}
-      </span>
-      {children}
-    </label>
+    <svg className="tick" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M3.5 8.5l3 3 6-7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   )
 }
 
-function Row({
-  left,
-  right,
-  color,
-  last,
-}: {
-  left: string
-  right: string
-  color: string
-  last: boolean
-}) {
+function LockIcon() {
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        padding: "8px 12px",
-        borderBottom: last ? "none" : `1px solid ${COLORS.border}`,
-      }}
-    >
-      <span>{left}</span>
-      <span style={{ color, fontWeight: 600 }}>{right}</span>
-    </div>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="4.5" y="10.5" width="15" height="10" rx="2.2" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M8 10.5V7.5a4 4 0 018 0v3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <circle cx="12" cy="15" r="1.4" fill="currentColor" />
+    </svg>
   )
-}
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "10px 12px",
-  fontSize: 15,
-  border: `1px solid ${COLORS.border}`,
-  borderRadius: 8,
-  outline: "none",
-  background: "#fff",
-  color: COLORS.text,
-  boxSizing: "border-box",
-}
-
-function primaryButton(busy: boolean): React.CSSProperties {
-  return {
-    width: "100%",
-    padding: "11px 12px",
-    fontSize: 15,
-    fontWeight: 600,
-    color: "#fff",
-    background: busy ? "#a5a3e0" : COLORS.accent,
-    border: "none",
-    borderRadius: 8,
-    cursor: busy ? "default" : "pointer",
-  }
-}
-
-const ghostButton: React.CSSProperties = {
-  width: "100%",
-  padding: "9px 12px",
-  fontSize: 14,
-  color: COLORS.muted,
-  background: "transparent",
-  border: "none",
-  borderRadius: 8,
-  cursor: "pointer",
-  marginTop: 8,
 }
