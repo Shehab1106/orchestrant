@@ -21,4 +21,9 @@ export class AdapterRegistry {
   has(providerId: string): boolean {
     return this.byId.has(providerId)
   }
+
+  /** Every registered provider id, in insertion order. */
+  ids(): string[] {
+    return [...this.byId.keys()]
+  }
 }

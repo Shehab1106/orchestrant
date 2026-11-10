@@ -1,44 +1,55 @@
 # orchestrant
 
 A framework-agnostic **payment orchestration engine**, wrapped in a thin
-**Next.js** app (API + checkout), frontend and backend in one repo. It routes a
-card charge across multiple providers, cascades to a fallback when a provider
-soft-declines, handles 3-D Secure, and stops cleanly on a hard decline, so a
-single savable payment gets every reasonable chance to succeed.
+**Next.js** app, frontend and backend in one repo. It answers the two questions a
+real checkout asks: *which payment methods do we offer this cart, and how does
+each one route* — then, when a method is charged, it walks that route, cascading
+to a fallback on a soft decline, pausing for 3-D Secure, and stopping cleanly on
+a hard decline.
 
-![orchestrant checkout: a charge cascading from a soft-declining provider to an approving one, and a 3-D Secure challenge resuming to success](docs/demo.gif)
+![orchestrant routing console: a cart context resolving a union of offered methods, each with its provider chain, and a charge cascading from a soft-declining provider to an approving one](docs/demo.gif)
 
 The core engine is **pure TypeScript** with no framework or database dependency.
-Next.js (delivery) and Postgres (storage) plug in behind interfaces.
+The interactive console imports it directly; a Next.js HTTP API and Postgres plug
+in behind the same interfaces.
 
-## The hard part
+## The two hard parts
 
-Orchestration is easy to describe and hard to get right, because the interesting cases are all
-failure cases. A charge can soft-decline (retry elsewhere), hard-decline (stop, don't burn the
-card on more attempts), time out (the money may or may not have moved), or demand a 3-D Secure
-challenge mid-flight. The engine models each outcome as an explicit `status` and lets *only*
-`soft_fail`/`timeout` cascade, so a savable payment gets every reasonable chance while a dead one
-stops immediately.
+**1. Discovery is a union, not a lookup.** A cart in a given country/currency is
+offered *many* methods, each potentially served by a *different* provider, and
+each method's route has to be resolved on its own. The engine runs the same
+`resolveProviderChain` for every method and offers it only if a chargeable chain
+comes back — so the offered set is a union across providers, and the admin
+preview can never drift from what the checkout actually shows (they call the same
+function).
 
-Two invariants hold it together:
+**2. The charge is all failure cases.** Once a method is charged, the interesting
+outcomes are the bad ones: a charge can soft-decline (retry elsewhere),
+hard-decline (stop — don't burn the card), time out (the money may or may not
+have moved), or demand a 3-D Secure challenge mid-flight. Each is an explicit
+`status`, and only `soft_fail`/`timeout` cascade.
 
-- **Idempotent replay.** Every attempt is keyed, so a retried or duplicated request never
-  double-charges. A network blip on the client is safe to repeat.
-- **3-D Secure without double challenges.** `requires_3ds` pauses the chain; on resume, the
-  already-cleared provider is suppressed so the shopper is never challenged twice for one payment.
+Two invariants hold the charge path together:
 
-The project exists to get that failure model right.
+- **Idempotent replay.** Every attempt is keyed, so a retried or duplicated
+  request never double-charges.
+- **3-D Secure without double challenges.** `requires_3ds` pauses the chain; on
+  resume the already-cleared provider is suppressed, so the shopper is never
+  challenged twice for one payment.
 
-## Concepts
+## The model
 
 | Piece | Responsibility |
 |---|---|
-| **`PSPAdapter`** | The contract every provider implements: `charge` / `refund` / `void` + capability flags (`supportsExternal3DS`, `supportsAutomatedRefund`, `supportsDescriptor`). |
-| **Categorizer** | Turns a provider's raw response into three independent axes: `status` (drives the retry decision), `errorCategory` (analytics), `customerMessage` (shopper-facing). Only `soft_fail`/`timeout` cascade. |
-| **Cascade** (`executeChargeChain`) | Walks an ordered chain: success wins and stops; `soft_fail`/`timeout` fall through; `hard_fail` stops; `requires_3ds` pauses (and is suppressed on a resume so the shopper is never challenged twice). |
-| **Routing** (`resolveRoute`) | Picks the ordered chain from rules matched on `country` / `currency` / `card network`, using per-provider weights + an explicit fallback order. |
-| **Service** (`orchestrateCharge`) | Ties the engine to persistence: idempotent replay, route resolution, cascade, attempt recording. Depends only on ports. |
-| **Ports** | `AttemptsRepository` / `RoutingRuleRepository` / `IdempotencyStore`, implemented in-memory (tests, zero-setup) and on Postgres (Drizzle). |
+| **Provider** | A PSP with a `config` (which `countries` / `currencies` / `methods` it covers) and a `kind`: `psp` (routed through rule weights) or `method_provider` (binds its one method directly, outside the weights). |
+| **Method** (catalog) | A payment method with its own geo cap (`supportedCountries` / `supportedCurrencies`, `null` = unrestricted) — independent of provider coverage. |
+| **Routing rule** | Matches a cart on `country` / `currency` / `cardNetwork` (omitted = wildcard); carries provider `weights`, a `fallbackOrder`, and one `isGlobalFallback` catch-all. |
+| **`resolveProviderChain`** | For one (cart, method): geo-cap the method → match the highest-priority rule (else the global fallback) → seed-weighted primary pick → build the capped fallback chain. A `method_provider` binds directly when no PSP is eligible. |
+| **`resolveOfferedMethods`** | Runs the above for every method and returns the **union** of offered methods (each with its chain), plus the ones that didn't resolve and why. |
+| **`executeChargeChain`** | Walks a resolved chain applying the retry model (below). |
+
+Determinism: the primary is a **seed-weighted** draw keyed on a `cartId`, so the
+same cart always routes the same way — a retry never ping-pongs between providers.
 
 ## The retry model
 
@@ -55,17 +66,16 @@ charge on provider →
 
 ```
 app/
-  page.tsx                          checkout FE (card, cascade trail, 3DS)
-  api/{charge,refund,void,health}/  route handlers
-  api/webhooks/[vendor]/            webhook ingestion (stub)
+  page.tsx                          the routing console (discovery + charge)
+  api/{charge,refund,void,health}/  route handlers (HTTP adapter)
 src/
-  orchestration/                    the framework-agnostic engine + service
-    adapters/  cascade/  routing/  persistence/
-    ports.ts  registry.ts  orchestrate-charge.ts  types.ts
+  orchestration/
+    discovery/                      resolveProviderChain, resolveOfferedMethods,
+                                    the seeded weighted pick, the catalog seed
+    adapters/  cascade/  routing/   mock gateway, executeChargeChain, resolveRoute
+    persistence/  ports.ts  registry.ts  orchestrate-charge.ts  types.ts
   db/                               Drizzle schema, client, seed
-  api/                              Zod request schemas + JSON helper
-  build-deps.ts                     Postgres-or-in-memory wiring
-tests/                              engine + service + API tests
+tests/                             discovery + engine + service + API tests
 ```
 
 ## Run it
@@ -75,68 +85,47 @@ pnpm install
 pnpm dev            # http://localhost:3000
 ```
 
-Open the checkout and pay. Test cards:
+Open the console, set a cart context, and watch the offered-method union update as
+you edit the config. Charge a method to drive its chain through a scenario:
 
-| Card token | Outcome |
+| Scenario | Outcome |
 |---|---|
-| `tok_ok` | cascades `mock_a` (soft-declines) → `mock_b` (approves) → success |
-| `tok_3ds` | 3-D Secure challenge, then approves on resume |
-| `invalid_card` | hard decline, stops the chain |
+| Primary approves | the resolved primary authorizes |
+| Primary soft-declines → cascade | primary `soft_fail`, the chain cascades to the fallback |
+| 3-D Secure, then approves | primary challenges, authorizes on resume |
+| Hard decline → chain stops | primary `hard_fail`, later providers are not tried |
 
-Or call the API directly:
+The HTTP API demonstrates the same cascade over its own seeded providers:
 
 ```bash
 curl -s localhost:3000/api/charge -H 'content-type: application/json' \
   -d '{"idempotencyKey":"t1","amount":5000,"currency":"USD","country":"US","card":{"token":"tok_ok","network":"visa"}}'
 ```
 
-By default it uses a seeded **in-memory** store (zero setup). For **Postgres**:
-
-```bash
-docker compose up -d          # local Postgres
-export DATABASE_URL=postgres://orchestrant:orchestrant@localhost:5432/orchestrant
-pnpm db:push                  # create tables
-pnpm db:seed                  # seed the default USD routing rule
-pnpm dev
-```
-
-## API
-
-| Method + path | Body | Notes |
-|---|---|---|
-| `POST /api/charge` | `idempotencyKey`, `amount` (minor units), `currency`, `card{token,network?}`, `country?`, `threeDSProof?` | routes + cascades; returns status, attempt trail, any 3DS challenge |
-| `POST /api/refund` | `providerId`, `pspReference`, `amount`, `idempotencyKey` | dispatches to the adapter |
-| `POST /api/void` | `providerId`, `pspReference` | dispatches to the adapter |
-| `POST /api/webhooks/:vendor` | vendor payload | ack stub (signature + dispatch TODO) |
-| `GET /api/health` | none | liveness |
+By default everything runs with a seeded **in-memory** store (zero setup). For
+**Postgres**, set `DATABASE_URL`, then `pnpm db:push && pnpm db:seed`.
 
 ## Develop
 
 ```bash
-pnpm test        # vitest
+pnpm test        # vitest — discovery, cascade, routing, service, API
 pnpm typecheck   # tsc --noEmit
 pnpm build       # next build
 ```
 
-## Scope and roadmap
+## Scope
 
-The goal is a complete, correct **engine**, not a production gateway. The line is drawn on
-purpose: the orchestration logic (routing, cascade, 3DS, idempotency, persistence) is fully built
-and tested against a mock provider, so the hard part is done and verifiable without a merchant
-account or secrets.
-
-Built:
-
-- Engine spine: adapter contract, cascade (+ 3DS / skip-on-resume), routing, mock gateway
-- Persistence: ports + in-memory + Postgres/Drizzle, and the `orchestrateCharge` service
-- Next.js API: `/charge`, `/refund`, `/void`, `/webhooks/:vendor`, `/health`
-- Checkout FE: card + cascade trail + 3DS challenge/resume
+The goal is a complete, correct **engine** — discovery and charge — not a
+production gateway. The orchestration logic (per-method discovery, routing,
+cascade, 3-DS, idempotency, persistence) is fully built and tested against a mock
+provider, so the hard part is done and verifiable without a merchant account or
+secrets. The catalog, providers, and rules are an invented, self-contained
+reference model, not any real payment system's data.
 
 Deliberately out of scope (they need real provider credentials, not more engine):
-
-- A real demo adapter (e.g. Stripe test-mode) behind the existing `PSPAdapter` contract
-- Webhook signature verification + dispatch
-- Production hardening: rate limits, structured logging, a real 3DS challenge iframe
+a real demo adapter behind the `PSPAdapter` contract, webhook signature
+verification, and production hardening (rate limits, structured logging, a real
+3-DS iframe).
 
 ## License
 

@@ -28,6 +28,8 @@ export interface OrchestrateDeps {
 export interface OrchestrateChargeResult extends OrchestrationResult {
   /** true when this response came from the idempotency store, not a fresh charge. */
   replayed: boolean
+  /** The ordered provider chain the router resolved for this charge context. */
+  route: string[]
 }
 
 export async function orchestrateCharge(
@@ -41,6 +43,7 @@ export async function orchestrateCharge(
       finalResult: prior.finalResult,
       attempts: [],
       replayed: true,
+      route: [],
     }
   }
 
@@ -58,7 +61,7 @@ export async function orchestrateCharge(
   }
 
   if (chain.length === 0) {
-    return { ...noRoute(providerIds.length === 0), replayed: false }
+    return { ...noRoute(providerIds.length === 0), replayed: false, route: providerIds }
   }
 
   const out = await executeChargeChain(chain, input)
@@ -83,7 +86,7 @@ export async function orchestrateCharge(
     })
   }
 
-  return { ...out, replayed: false }
+  return { ...out, replayed: false, route: providerIds }
 }
 
 /** No rule matched, or none of the resolved providers are registered. */

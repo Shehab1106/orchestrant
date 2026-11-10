@@ -31,9 +31,14 @@ export async function POST(req: Request): Promise<Response> {
       customerMessage: result.finalResult.customerMessage,
       pspReference: result.finalResult.pspReference,
       threeDSChallenge: result.finalResult.threeDSChallenge,
+      // The ordered provider chain the router resolved for this context.
+      route: result.route,
       attempts: result.attempts.map((a) => ({
         providerId: a.providerId,
         status: a.result.status,
+        errorCategory: a.result.errorCategory,
+        errorCode: a.result.errorCode ?? null,
+        pspReference: a.result.pspReference ?? null,
       })),
     },
     httpStatus,
