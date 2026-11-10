@@ -1,5 +1,7 @@
 # orchestrant
 
+[![CI](https://github.com/Shehab1106/orchestrant/actions/workflows/ci.yml/badge.svg)](https://github.com/Shehab1106/orchestrant/actions/workflows/ci.yml)
+
 A framework-agnostic **payment orchestration engine**, wrapped in a thin
 **Next.js** app, frontend and backend in one repo. It answers the two questions a
 real checkout asks: *which payment methods do we offer this cart, and how does
