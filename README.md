@@ -7,7 +7,7 @@ each one route* — then, when a method is charged, it walks that route, cascadi
 to a fallback on a soft decline, pausing for 3-D Secure, and stopping cleanly on
 a hard decline.
 
-![orchestrant routing console: a cart context resolving a union of offered methods, each with its provider chain, and a charge cascading from a soft-declining provider to an approving one](docs/demo.gif)
+![orchestrant routing console: a cart context resolving the union of offered payment methods, each with its provider chain and the routing rule that produced it](docs/demo.png)
 
 The core engine is **pure TypeScript** with no framework or database dependency.
 The interactive console imports it directly; a Next.js HTTP API and Postgres plug
