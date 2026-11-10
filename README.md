@@ -108,10 +108,18 @@ By default everything runs with a seeded **in-memory** store (zero setup). For
 ## Develop
 
 ```bash
-pnpm test        # vitest — discovery, cascade, routing, service, API
+pnpm test        # vitest — engine, service, API, plus property-based routing tests
+pnpm test:db     # the Drizzle/Postgres repositories against a real database (needs Docker)
 pnpm typecheck   # tsc --noEmit
 pnpm build       # next build
 ```
+
+`pnpm test` includes property-based tests that assert the routing invariants over
+hundreds of randomized carts — in particular that a method is never offered with a
+chain that can't serve it. `pnpm test:db` stands up a real Postgres via
+testcontainers, applies the migrations, and exercises the persistence layer,
+including that the idempotency store never double-stores a key under a concurrent
+race.
 
 ## Scope
 
