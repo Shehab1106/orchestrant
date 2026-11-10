@@ -101,6 +101,32 @@ export default function Orchestrant() {
       return next
     })
   }
+  // Toggle one value in a provider's coverage array. This is the config the
+  // union actually reads: a provider is kept for a cart only if it covers the
+  // cart's country, currency, and method (see resolveProviderChain's coversCart).
+  function toggleCoverage(providerId: string, dim: "countries" | "currencies" | "methods", value: string) {
+    setCatalog((c) => {
+      const next = cloneCatalog(c)
+      const p = next.providers.find((x) => x.id === providerId)
+      if (!p) return next
+      const arr = p.config[dim]
+      const i = arr.indexOf(value)
+      if (i >= 0) arr.splice(i, 1)
+      else arr.push(value)
+      return next
+    })
+  }
+  // A method provider IS a single method (Tabby = pay-later): its methods set is
+  // exactly one, so the picker is radio, not multi-select. Picking another moves
+  // the binding; you can never reach zero or many.
+  function setSoleMethod(providerId: string, value: string) {
+    setCatalog((c) => {
+      const next = cloneCatalog(c)
+      const p = next.providers.find((x) => x.id === providerId)
+      if (p) p.config.methods = [value]
+      return next
+    })
+  }
   function setWeight(ruleId: string, providerId: string, value: string) {
     const w = Math.max(0, Math.round(Number.parseFloat(value) || 0))
     setCatalog((c) => {
@@ -264,18 +290,29 @@ export default function Orchestrant() {
             <h2>Config <button className="link-btn" onClick={resetConfig}>reset</button></h2>
 
             <div className="cfg-group">
-              <div className="cfg-label">Providers</div>
+              <div className="cfg-label">Providers <span className="cfg-hint">coverage the cart must fall inside</span></div>
               {catalog.providers.map((p) => (
-                <button
-                  key={p.id}
-                  className={`cfg-item ${p.status === "active" ? "on" : "off"}`}
-                  onClick={() => toggleProvider(p.id)}
-                  aria-pressed={p.status === "active"}
-                >
-                  <span className="dot" />
-                  <span className="cfg-name mono">{p.id}</span>
-                  <span className={`kindtag ${p.kind}`}>{p.kind === "psp" ? "PSP" : "method provider"}</span>
-                </button>
+                <div className={`prov-box ${p.status === "active" ? "on" : "off"}`} key={p.id}>
+                  <button
+                    className="prov-head"
+                    onClick={() => toggleProvider(p.id)}
+                    aria-pressed={p.status === "active"}
+                    title={p.status === "active" ? "disable provider" : "enable provider"}
+                  >
+                    <span className="dot" />
+                    <span className="cfg-name mono">{p.id}</span>
+                    <span className={`kindtag ${p.kind}`}>{p.kind === "psp" ? "PSP" : "method provider"}</span>
+                  </button>
+                  <div className="cov">
+                    <CovRow label="countries" universe={COUNTRIES} active={p.config.countries} onToggle={(v) => toggleCoverage(p.id, "countries", v)} />
+                    <CovRow label="currencies" universe={CURRENCIES} active={p.config.currencies} onToggle={(v) => toggleCoverage(p.id, "currencies", v)} />
+                    {p.kind === "method_provider" ? (
+                      <CovRow label="method" hint="binds one" universe={catalog.methods.map((m) => m.code)} active={p.config.methods} onToggle={(v) => setSoleMethod(p.id, v)} single />
+                    ) : (
+                      <CovRow label="methods" universe={catalog.methods.map((m) => m.code)} active={p.config.methods} onToggle={(v) => toggleCoverage(p.id, "methods", v)} />
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
 
@@ -492,6 +529,31 @@ function ChargeVerdict({ charge, providerName }: { charge: ChargeState; provider
       <div>
         <div className="vmain">Payment declined{replay}</div>
         <div className="vsub">{charge.finalResult?.customerMessage}{!charge.replayed ? " The chain stopped; later providers were not tried." : ""}</div>
+      </div>
+    </div>
+  )
+}
+
+function CovRow({ label, universe, active, onToggle, single = false, hint }: { label: string; universe: readonly string[]; active: string[]; onToggle: (v: string) => void; single?: boolean; hint?: string }) {
+  return (
+    <div className="cov-row">
+      <span className="cov-label">{label}{hint && <em className="cov-hint"> {hint}</em>}</span>
+      <div className="cov-chips" role={single ? "radiogroup" : undefined}>
+        {universe.map((v) => {
+          const on = active.map((x) => x.toLowerCase()).includes(v.toLowerCase())
+          return (
+            <button
+              key={v}
+              className={`cov-chip ${single ? "radio" : ""} ${on ? "on" : ""}`}
+              onClick={() => onToggle(v)}
+              role={single ? "radio" : undefined}
+              aria-checked={single ? on : undefined}
+              aria-pressed={single ? undefined : on}
+            >
+              {v}
+            </button>
+          )
+        })}
       </div>
     </div>
   )
